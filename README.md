@@ -15,7 +15,7 @@ they use it.
 - **Sorts every email into a category.** Each message is classified as Needs
   Action, Red Flag, FAQ, Spam/Newsletter, or Others. Fast keyword and domain
   rules run first, and anything they do not catch is sent to a language model
-  (Groq's `llama-3.3-70b-versatile`) in batches. If the model is unavailable, the
+  in batches. If the model is unavailable, the
   message falls back to a safe category instead of being dropped.
 - **Learns from you.** When you move a message to a different category, that
   correction is remembered immediately, along with the sender and the words in
@@ -88,7 +88,7 @@ tests/             Isolated regression suite
 
 - Python, FastAPI, and Uvicorn for the backend
 - APScheduler for recurring and one-time triage
-- Groq for classification, summaries, and relative-date resolution
+- A language model for classification, summaries, and relative-date resolution
 - SQLite for per-user storage
 - fastembed for local semantic search
 - Google Apps Script for the Gmail add-on
@@ -147,8 +147,9 @@ single-account command line version, run `python -m app.main`.
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The suite uses a temporary database and mocked Gmail and Groq clients, so it
-never touches a real inbox. It covers classification order, learning and manual
+The suite uses a temporary database and mocked Gmail and language model clients,
+so it never touches a real inbox. It covers classification order, learning and
+manual
 corrections, public-domain protection, deadline extraction, reply priority,
 conversation memory, reminders, OAuth handling, identity binding, schedule
 persistence, and the add-on API contract.
@@ -168,14 +169,6 @@ persistence, and the add-on API contract.
   residency this can be replaced with a self-hosted model.
 - The backend can run on the client's own infrastructure, so their email data
   and database stay within their control.
-
-## The unverified app screen
-
-While the OAuth app is still in testing, Google shows a warning during sign-in
-because the app is not yet verified. This is expected for a self-hosted project.
-Choose Advanced and continue. Testing mode allows a limited number of listed test
-users. Lifting the warning for the general public requires Google verification
-and the associated security review, which is only needed for a public launch.
 
 ## Deployment notes
 
