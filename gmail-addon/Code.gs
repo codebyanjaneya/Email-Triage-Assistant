@@ -417,8 +417,7 @@ function buildHomeCard_() {
     );
     section.addWidget(
       CardService.newTextParagraph().setText(
-        'Sorting is running. This screen does not update on its own \u2014 ' +
-          'wait a little, then tap Refresh to check if it is done.'
+        'Sorting is running. Wait a bit, then tap Refresh to see if it is done.'
       )
     );
   } else {
@@ -445,9 +444,8 @@ function buildHomeCard_() {
     );
     section.addWidget(
       CardService.newTextParagraph().setText(
-        'Approx time \u2014 Up to 1 day: ~1\u20132 min \u00b7 Up to 1 week: ~3\u20135 min ' +
-          '(varies with inbox size). This screen does not auto-update; after ' +
-          'starting, tap Refresh to check progress.'
+        'Up to 1 day takes about 1-2 min, 1 week about 3-5 min. ' +
+          'Tap Refresh after to see results.'
       )
     );
   }

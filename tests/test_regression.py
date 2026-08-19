@@ -887,7 +887,7 @@ class DeploymentSafetyTests(unittest.TestCase):
             response = server.api_addon_digest(request)
 
         self.assertEqual(response.status_code, 200)
-        alerts.assert_called_once_with("user@example.com", limit=200)
+        alerts.assert_called_once_with("user@example.com", limit=15)
         deadlines.assert_called_once_with("user@example.com", limit=1000)
 
     def test_addon_message_context_returns_current_category_controls(self):

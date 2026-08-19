@@ -945,7 +945,7 @@ def api_addon_digest(request: Request):
     counts = progress["counts"] if progress else None
     rules = list_learned_rules(email)
     active_rules = sum(1 for r in rules if r.get("active"))
-    alerts = _addon_alert_items(email, limit=200)
+    alerts = _addon_alert_items(email, limit=15)
     deadlines = _with_gmail_url(upcoming_deadlines(email, limit=1000), email)
     run = last_undoable_run(email)
     return JSONResponse(
@@ -964,9 +964,9 @@ def _addon_alert_items(email, limit=3):
     alert_cats = {"red flag", "needs action"}
     candidates = [
         item
-        for item in top_priority(email, max(50, limit))
+        for item in top_priority(email, max(25, limit))
         if (item.get("category") or "").lower() in alert_cats
-    ]
+    ][:limit]
     service = _service_for_user(email)
     if service is None or not candidates:
         return []

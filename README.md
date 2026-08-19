@@ -1,112 +1,101 @@
 # Email Triage Assistant
 
-An AI-assisted inbox triage tool for Gmail. It connects to your Gmail account,
-reads your unread email, sorts each message into a category, labels it in Gmail,
-and can draft (never send) polite replies for a category you choose. It runs as a
-multi-user web dashboard or as a single-account command-line tool, and it can
-search your processed email by meaning rather than keywords.
+An AI assistant that keeps a busy Gmail inbox under control. It reads your unread
+email, sorts each message into a clear category, labels it in Gmail, pulls out
+deadlines, points you to the mail that actually needs your attention, and can
+draft (but never send) replies. It runs both as a Gmail add-on that lives inside
+your inbox and as a multi-user web dashboard.
 
-Built for individuals and small teams who want to keep a busy inbox under control
-without giving an AI the ability to send mail on their behalf.
+The goal is simple. People lose a large part of their day just deciding which
+emails matter. This tool makes that decision for them and gets better the more
+they use it.
 
-## Features
+## What it does
 
-- **Gmail OAuth (multi-user).** The web app uses a browser-based OAuth flow with
-  PKCE; each connected account's token is stored separately in a local SQLite
-  database, keyed by the email from the OpenID Connect ID token. A signed session
-  cookie tracks who is logged in. The CLI uses the classic installed-app flow.
-- **Hybrid rule + AI classification.** Fast deterministic keyword/domain rules
-  run first; anything they don't catch is classified by Groq's LLM
-  (`llama-3.3-70b-versatile`) in batches. If the model is unavailable or returns
-  an unexpected value, the email falls back to a safe default category rather
-  than being dropped.
-- **Adaptive learning.** Repeated specific LLM decisions become transparent
-  sender/domain rules after three consistent observations. A manual correction
-  is trusted immediately and stores subject keywords, old/new category, weight,
-  and recency. Weighted sender/domain/keyword evidence runs before the LLM, and
-  past corrections are included in its prompt. `Others` is deliberately never
-  auto-learned, so later mail can still be reconsidered.
-- **Conversation-aware spam protection.** Senders the user has replied to are
-  remembered as known contacts and are never left in a spam/newsletter bucket.
-- **Priority, alerts, and deadlines.** Deterministic scoring lifts urgent mail
-  and replies; unread red-flag/action mail is pinned in the Gmail add-on; explicit
-  due dates are extracted and shown soonest first. A validated structured Groq
-  fallback resolves relative deadlines that deterministic parsing cannot.
-- **Reminder emails.** An opt-in scheduler sends deduplicated summaries for
-  unread high-priority mail older than 24 hours and deadlines due within 7 days.
-- **One-click summaries.** When a Gmail message is open, the add-on can send its
-  subject/body to the backend and display a short Groq-generated bullet summary.
-- **Customizable categories.** Each user defines their own category list and
-  which category (if any) triggers auto-reply drafting. Rules only apply for
-  categories the user actually uses.
-- **Auto-reply drafting (Drafts only).** For the configured category, the app
-  generates a short, polite reply grounded in editable FAQ templates and saves it
-  as a **Gmail draft**. It never calls send — a human always reviews and sends.
-- **Chained / chunked inbox processing.** Email is fetched and processed in
-  chunks (200 at a time). Each processed message is tagged with an `AI-Processed`
-  label so repeated runs advance through the inbox instead of reprocessing the
-  same messages. One click processes the whole inbox until it's caught up.
-- **One-time run scheduling.** Schedule a triage run for a specific date and time
-  (including later today). Backed by APScheduler; you can view or cancel a pending
-  run.
-- **Semantic search.** Every processed email is embedded locally with a small
-  `fastembed` model and stored in SQLite. Search ranks results by cosine
-  similarity to your query's embedding — no external vector database needed.
-- **Gmail add-on.** An Apps Script card provides date/range triage controls,
-  unread alerts, deadlines, auto-sort, undo, contextual category correction,
-  and one-click summarization in Gmail web/mobile.
+- **Sorts every email into a category.** Each message is classified as Needs
+  Action, Red Flag, FAQ, Spam/Newsletter, or Others. Fast keyword and domain
+  rules run first, and anything they do not catch is sent to a language model
+  (Groq's `llama-3.3-70b-versatile`) in batches. If the model is unavailable, the
+  message falls back to a safe category instead of being dropped.
+- **Learns from you.** When you move a message to a different category, that
+  correction is remembered immediately, along with the sender and the words in
+  the subject. Similar mail from then on is handled the same way without asking
+  the model again. Repeated model decisions also turn into gentle guidance after
+  a few consistent observations. Corrections stay specific, so fixing one subject
+  does not blindly reroute everything from that sender.
+- **Shows you what needs attention.** Unread Red Flag and Needs Action mail is
+  surfaced in a short list, ranked by category, how recent it is, whether it is a
+  reply in an ongoing thread, and whether you know the sender. Once you open a
+  message it drops off the list.
+- **Finds deadlines on its own.** Due dates are pulled straight from the email
+  text, including plain dates, formatted dates, and relative ones like tomorrow.
+  Only real future deadlines with a clear cue are kept. Promotional and spam mail
+  never produce a deadline.
+- **Summarizes long email in one click.** Open a message and the add-on turns it
+  into a few factual bullet points, keeping the requests, dates, and amounts.
+- **Drafts replies without sending them.** For a category you choose (FAQ by
+  default), the app writes a short, polite reply grounded in your own templates
+  and saves it as a Gmail draft. It never calls send. A person always reviews and
+  sends the message.
+- **Protects real conversations from spam.** Anyone you have replied to is
+  remembered as a known contact and is never left in a spam bucket.
+- **Runs on a schedule.** Turn on auto-sort and triage happens quietly in the
+  background at the interval you pick, so the inbox stays organized on its own.
+- **Searches by meaning.** Every processed email is embedded locally, so you can
+  search your mail by what it is about rather than by exact words. No external
+  vector database is needed.
+- **Works inside Gmail.** The Apps Script add-on gives you date and range
+  controls, alerts, deadlines, one-click summaries, category corrections, undo,
+  and a link back to the full web dashboard, on both web and mobile Gmail.
 
-## Architecture
+## How it is built
 
-Two entry points share one pipeline. The **CLI** (`app.main`) uses an
-installed-app OAuth flow (`credentials.json` → `token.json`). The **web app**
-(`app.server`, FastAPI) is multi-user: a PKCE web OAuth flow
-(`web_credentials.json`) stores each account's token in SQLite (`app.db`), keyed
-by the email from the OIDC ID token, with a signed session cookie identifying the
-current user. The core pipeline (`app.main.triage` / `triage_until_empty`) fetches
-not-yet-processed inbox mail (`gmail_client`), classifies it with deterministic,
-learned, then Groq rules (`rules` + `classifier` + `db`), applies the category and
-hidden `AI-Processed` labels (`labeler`), optionally drafts a reply, calculates
-priority, extracts deadlines, remembers conversation contacts, and stores a local
-embedding. APScheduler runs scheduled/recurring triage. `app.server` serves both
-the dashboard and secret-protected Gmail add-on API; `gmail-addon/` contains the
-Apps Script client.
+Two entry points share one pipeline. The web app (FastAPI) is multi-user. Each
+account signs in with Google using OAuth with PKCE, and its token is stored
+separately in a local SQLite database, keyed by the email from the verified
+OpenID Connect token. The command line version uses the classic installed-app
+flow for a single account.
+
+The core pipeline fetches mail that has not been processed yet, classifies it
+with deterministic rules, then learned memory, then the language model, applies
+the category label plus a hidden processing label so the same mail is never
+handled twice, optionally drafts a reply, scores priority, extracts deadlines,
+remembers conversation contacts, and stores a local embedding. A background
+scheduler runs recurring and one-time triage.
 
 ```
 app/
-  config.py        Env/config (GROQ_API_KEY, SESSION_SECRET)
-  gmail_client.py  OAuth + fetch unread email; applies the "AI-Processed" label
-  web_auth.py      Multi-user web OAuth (PKCE); one token per account
-  db.py            SQLite: tokens, per-user category settings, embeddings
-                   learned rules, contacts, priority, deadlines, undo state
-  classifier.py    Rules-first, Groq-LLM-fallback classification
-  rules.py         Deterministic keyword/domain rules
-  auto_reply.py    Groq-drafted replies (Gmail Drafts only)
-  priority.py      Deterministic attention scoring + explanations
-  deadlines.py     High-precision explicit deadline extraction
-  summarize.py     Groq-powered bullet summaries for the Gmail add-on
-  commands.py      Preview/execute natural-language bulk mailbox commands
-  search.py        Local embeddings + cosine-similarity search
-  main.py          Triage pipeline + CLI entry point
-  server.py        FastAPI app: routes, session, scheduler
-static/            Dashboard: index.html, app.js, app.css
-gmail-addon/       Apps Script Gmail add-on (Code.gs + manifest)
-tests/             Isolated unittest regression suite
+  config.py        Environment and configuration
+  gmail_client.py  OAuth and Gmail access, applies the AI-Processed label
+  web_auth.py      Multi-user web OAuth (PKCE), one token per account
+  db.py            SQLite: tokens, settings, learned rules, contacts,
+                   priority, deadlines, embeddings, schedules
+  classifier.py    Rules first, learned memory next, LLM last
+  rules.py         High-confidence keyword and domain rules
+  auto_reply.py    Draft replies saved to Gmail Drafts only
+  priority.py      Deterministic attention scoring with reasons
+  deadlines.py     Deadline extraction with an LLM fallback for relative dates
+  summarize.py     Bullet summaries for the add-on
+  search.py        Local embeddings and cosine-similarity search
+  main.py          Triage pipeline and CLI entry point
+  server.py        FastAPI app, routes, sessions, scheduler
+static/            Web dashboard
+gmail-addon/       Apps Script Gmail add-on (Code.gs and manifest)
+tests/             Isolated regression suite
 ```
 
-## Requirements
+## Tech stack
 
-- **Python 3.10+**
-- A Google account with Gmail
-- A **Groq API key** (for classification and reply drafting)
+- Python, FastAPI, and Uvicorn for the backend
+- APScheduler for recurring and one-time triage
+- Groq for classification, summaries, and relative-date resolution
+- SQLite for per-user storage
+- fastembed for local semantic search
+- Google Apps Script for the Gmail add-on
 
-Python dependencies are pinned in `requirements.txt` (FastAPI + uvicorn, the
-google-api-python-client and auth libraries, groq, apscheduler, fastembed, numpy,
-itsdangerous, python-dotenv, python-multipart).
+## Getting started
 
-## Setup
-
-### 1. Create a virtual environment and install dependencies
+### 1. Install
 
 ```powershell
 python -m venv .venv
@@ -114,120 +103,84 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-> The first time semantic search runs, `fastembed` downloads a small embedding
-> model (~70 MB) into its local cache.
+The first semantic search downloads a small embedding model into a local cache.
 
-### 2. Configure environment variables
+### 2. Configure
+
+Copy the example environment file and fill it in.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Then edit `.env`:
+| Variable | Purpose |
+| --- | --- |
+| `GROQ_API_KEY` | Key used for classification, summaries, and reply drafting |
+| `APP_ENV` | Set to `production` on a hosted service to enable strict checks |
+| `SESSION_SECRET` | Signs the web session cookie; use a long random value |
+| `SESSION_HTTPS_ONLY` | Set true in production so cookies are HTTPS only |
+| `OAUTH_REDIRECT_URI` | OAuth callback URL; the public HTTPS callback in production |
+| `ADDON_SHARED_SECRET` | Shared secret required by every add-on API call |
+| `ADDON_GOOGLE_AUDIENCE` | OAuth client ID used to verify signed add-on identity tokens |
+| `APP_DB_PATH` | SQLite path; put it on persistent storage in production |
+| `HOST` / `PORT` | Bind address and port |
+| `REMINDER_EMAILS_ENABLED` | Set true to send periodic self-reminder emails |
 
-| Variable         | Purpose                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------- |
-| `GROQ_API_KEY`   | Groq API key used for classification and reply drafting.                                                   |
-| `APP_ENV`        | Set to `production` on the hosted service to enable fail-fast security validation.                         |
-| `SESSION_SECRET` | Secret used to sign the web app's session cookies. Set a long random value for anything beyond local use.  |
-| `ADDON_SHARED_SECRET` | Shared secret required by every `/api/addon/*` request. Match the add-on's `ADDON_SECRET`.           |
-| `ADDON_GOOGLE_AUDIENCE` | Standard Cloud project's OAuth client ID; enables signed Apps Script user identity binding.       |
-| `OAUTH_REDIRECT_URI` | OAuth callback URL; set this to the public HTTPS callback when deployed.                                  |
-| `APP_DB_PATH` | SQLite path; set it inside a persistent mounted volume in production.                                         |
-| `HOST` / `PORT` | Bind address and port. Hosted deployments normally use `0.0.0.0` and the platform-provided port.              |
-| `REMINDER_EMAILS_ENABLED` | Set `true` to enable automatic self-reminder emails every three hours.                            |
+You also need two Google OAuth clients from the Google Cloud console. A Desktop
+client saved as `credentials.json` for the command line flow, and a Web client
+saved as `web_credentials.json` for the dashboard. The only Gmail data scope
+requested is `gmail.modify`, which allows reading mail and applying labels and
+drafts. It cannot permanently delete mail and it never sends.
 
-### 3. Google Cloud Console setup
-
-1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create
-   (or select) a project.
-2. **Enable the Gmail API:** _APIs & Services → Library →_ search **Gmail API** →
-   **Enable**.
-3. **Configure the OAuth consent screen:** _APIs & Services → OAuth consent
-   screen_ → **External** → fill in app name, support email, and developer
-   contact. Under **Test users**, add every Google account that will sign in
-   (while the app is unverified, only listed test users can authorize it).
-4. **Create OAuth client credentials** (_APIs & Services → Credentials → Create
-   Credentials → OAuth client ID_). This project uses **two** clients:
-   - **Desktop app** — used by the CLI's installed-app flow. Download it and save
-     as `credentials.json` in the project root.
-   - **Web application** — used by the web dashboard. Add
-     `http://localhost:8000/auth/callback` as an **Authorized redirect URI**,
-     then download it and save as `web_credentials.json` in the project root.
-
-The requested scopes are `gmail.modify` (read email and apply labels/drafts),
-plus `openid` and `email` for the web flow (to identify the connected account).
-
-> `credentials.json`, `web_credentials.json`, `token.json`, `.env`, and `app.db`
-> are git-ignored. Never commit them.
-
-## Running
-
-### Web dashboard (multi-user)
+### 3. Run
 
 ```powershell
-uvicorn app.server:app --reload --port 8000
+.venv\Scripts\python.exe run_server.py
 ```
 
-Open <http://localhost:8000>, click **Connect Gmail**, and authorize. Then:
-
-- **Run Triage** processes the whole inbox in chunks and shows per-category
-  counts (and how many auto-reply drafts were created).
-- **Categories** lets you edit your category list and pick the auto-reply
-  category.
-- **Search** finds processed emails by meaning.
-- **Run on** schedules a one-time run (including later today).
-
-### CLI (single account)
-
-```powershell
-python -m app.main
-```
-
-This runs the installed-app OAuth flow (opening a browser on first use and
-caching `token.json`), then classifies and labels up to 200 not-yet-processed
-unread emails and prints a summary. Because processed emails are tagged
-`AI-Processed`, running it again continues through the rest of the inbox.
+Open http://localhost:8000, connect your Gmail account, and run a triage. For the
+single-account command line version, run `python -m app.main`.
 
 ## Testing
-
-Run the isolated regression suite from the project root:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The suite uses a temporary SQLite database and mocked Gmail/Groq clients; it
-does not change the connected inbox or production `app.db`. Before deployment,
-follow [`GMAIL_TESTING.md`](GMAIL_TESTING.md) for the documented real-inbox,
-add-on, OAuth onboarding, reminder, reply, and learning checks. The guide also
-records the live results verified during the August 2026 Gmail test run.
+The suite uses a temporary database and mocked Gmail and Groq clients, so it
+never touches a real inbox. It covers classification order, learning and manual
+corrections, public-domain protection, deadline extraction, reply priority,
+conversation memory, reminders, OAuth handling, identity binding, schedule
+persistence, and the add-on API contract.
 
-## Pilot deployment constraints
+## Security and privacy
 
-- Run exactly one backend worker. Scheduler state and per-user run locks are
-  process-local; multiple workers can duplicate recurring triage.
-- Mount `APP_DB_PATH` on durable storage. SQLite contains OAuth tokens, learned
-  memory, deadlines, priority, and settings.
-- One-time schedules and recurring auto-triage intervals are persisted in
-  SQLite and restored after restart. Active run progress and cancellation remain
-  process-local, which is another reason to use one worker.
-- The Gmail add-on always requires the shared secret. When
-  `ADDON_GOOGLE_AUDIENCE` is configured, the backend also verifies the signed
-  Apps Script identity token and binds its email claim to the requested user.
-  Keep identity-token verification enabled for any multi-user deployment.
+- Sign-in uses Google OAuth with PKCE, and the account is confirmed by Google
+  through the OpenID Connect token rather than being self-reported.
+- Only the `gmail.modify` scope is requested. The app never deletes mail and
+  never sends on your behalf. Replies are always saved as drafts for review.
+- All data is isolated per user and keyed by the verified email.
+- Database access uses parameterized queries, and mail content shown in the
+  dashboard is HTML escaped.
+- Secrets live in environment variables and untracked credential files.
+- The only point where mail content leaves the server is the language model
+  provider, reached over HTTPS for classification and summaries. For strict data
+  residency this can be replaced with a self-hosted model.
+- The backend can run on the client's own infrastructure, so their email data
+  and database stay within their control.
 
-## The Google "unverified app" screen
+## The unverified app screen
 
-While your OAuth app is still in **Testing** (unverified), Google shows a warning
-during sign-in — _"Google hasn't verified this app."_ This is expected for a
-self-hosted project: choose **Advanced → Go to &lt;app&gt; (unsafe)** to continue.
-An unverified app is also limited to **100 users**, and only accounts you added as
-**test users** on the OAuth consent screen can authorize it. Lifting the warning
-and the cap requires submitting the app for Google verification; for personal or
-small-team use, running it unverified with test users is perfectly fine.
+While the OAuth app is still in testing, Google shows a warning during sign-in
+because the app is not yet verified. This is expected for a self-hosted project.
+Choose Advanced and continue. Testing mode allows a limited number of listed test
+users. Lifting the warning for the general public requires Google verification
+and the associated security review, which is only needed for a public launch.
 
----
+## Deployment notes
 
-Built by **RootStock Technology**.
-
+- Run a single backend worker. Progress and run locks are process-local.
+- Put `APP_DB_PATH` on durable storage. It holds tokens, learned memory,
+  deadlines, priority, and settings.
+- Use a stable HTTPS backend for real use. Temporary tunnels change their
+  hostname and are only suitable for quick testing.
